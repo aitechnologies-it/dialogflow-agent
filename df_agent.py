@@ -15,13 +15,15 @@ logger = logging.getLogger(__name__)
 
 class DialogFlowAgent:
     def __init__(self, project_name, service_account_filename, **kwargs):
+        if project_name is None or service_account_filename is None:
+            raise ValueError(f'Please provide correct project name and service account file.')
         self.client = dialogflow_v2.AgentsClient.from_service_account_json(service_account_filename)
-        parent = client.project_path(project_name)
+        self.parent = self.client.project_path(project_name)
         
     def get_agent(self):
         zip_raw = None
         try:
-            operation = client.export_agent(parent)
+            operation = self.client.export_agent(self.parent)
             zip_raw = operation.result().agent_content
         except google.api_core.exceptions.GoogleAPICallError as e:
             print("From docs: 'Request failed for any reason'.")
@@ -51,7 +53,8 @@ class AgentReader:
     def close(self, **kwargs):
         pass
 
-    def from_remote(self, dialogflow):
+    @staticmethod
+    def from_remote(dialogflow, **kwargs):
         return dialogflow.get_agent()
     
     @classmethod
@@ -144,9 +147,9 @@ class JSONIntentReader(IntentReader):
         return intents
 
 class DialogFlowAgentExport:
-    def __init__(self, local_path_or_url, **kwargs):
+    def __init__(self, local_path_or_url, dialogflow=None, **kwargs):
         super(DialogFlowAgentExport, self).__init__()
-        self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url)
+        self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url, dialogflow=dialogflow)
         self.intents_reader = JSONIntentReader(reader=self.agent_reader)
 
     def get_intents(self, **kwargs):
@@ -158,11 +161,14 @@ class DialogFlowAgentExport:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local_path_or_url", type=str, required=True, help="The path to local agent zip file (/dir) or remote url.")
+    parser.add_argument("--local_path_or_url", type=str, required=True, help="The path to local agent zip file (/dir) or gcp project name hosting dialogflow agent.")
+    parser.add_argument("--service_account", type=str, required=False, help="The GCP service account path.")
     args = parser.parse_args()
 
-    agent = DialogFlowAgentExport(local_path_or_url=args.local_path_or_url)
+    df = DialogFlowAgent(project_name=args.local_path_or_url, service_account_filename=args.service_account)
+    agent = DialogFlowAgentExport(local_path_or_url=args.local_path_or_url, dialogflow=df)
     agent.get_intents()
 
 if __name__ == "__main__":
     main()
+
