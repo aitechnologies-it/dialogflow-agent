@@ -226,7 +226,7 @@ class DialogFlowAgentExport:
         self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url, dialogflow=dialogflow)
         self.intents_reader = readers[content_type](agent_reader=self.agent_reader, **kwargs)
 
-    def get_intents(self, **kwargs) -> Dict[str, List[str]]:
+    def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         return self.intents_reader.get_intents()
 
     def get_intent_names(self, **kwargs) -> List[str]:
