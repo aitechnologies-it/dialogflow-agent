@@ -193,6 +193,9 @@ class BaseOutputFormatIntentWriter(IntentWriter):
                     if not isinstance(text, str) or not isinstance(label, str):
                         logger.info(f'Found intent name or user sentence not to be of type string. Skipping example = {i}.')
                         continue
+                    if not text or not label:
+                        logger.info(f'Found intent name or user sentence not to empty string. Skipping example = {i}.')
+                        continue
                     sent_fp.write(f'{text}\n')
                     label_fp.write(f'{label}\n')
 
@@ -230,13 +233,13 @@ class DialogFlowAgentClient:
             operation = self.client.export_agent(self.parent)
             zip_raw = operation.result().agent_content
         except google.api_core.exceptions.GoogleAPICallError as e:
-            print("From docs: 'Request failed for any reason'.")
+            logger.error("From docs: 'Request failed for any reason'.")
             raise e
         except google.api_core.exceptions.RetryError as e:
-            print("From docs: 'Eequest failed due to a retryable error and retry attempts failed'.")
+            logger.error("From docs: 'Eequest failed due to a retryable error and retry attempts failed'.")
             raise e
         except ValueError as e:
-            print("Invalid parameters")
+            logger.error("Invalid parameters")
             raise e
         return zip_raw
 
@@ -274,12 +277,21 @@ def main():
     parser.add_argument("--local_path_or_url", type=str, required=True, help="The path to local agent zip file (/dir) or gcp project name hosting dialogflow agent.")
     parser.add_argument("--service_account", type=str, required=False, help="The GCP service account path.")
     parser.add_argument("--output_dir", type=str, required=False, help="The output dir to write data to, eg intent, labels, etc..")
-    parser.add_argument("--content_type", type=str, required=False, help="The type of files to handle in the export / import df agent. Choose: json.")
-    parser.add_argument("--output_format", type=str, required=False, help="The output format to write intents out. Choose: default.")
+    parser.add_argument("--content_type", type=str, default='json', required=False, help="The type of files to handle in the export / import df agent. Choose: json.")
+    parser.add_argument("--output_format", type=str, default='default', required=False, help="The output format to write intents out. Choose: default.")
     args = parser.parse_args()
 
+    logger.warning(f"Arguments: local_path_or_url={args.local_path_or_url}"
+                            f" - service account={args.service_account} - output_dir={args.output_dir}"
+                            f" - content_type={args.content_type} - output_format={args.output_format}")
+
     # Setup dialogflow agent
-    agent = DialogFlowAgent(local_path_or_url=args.local_path_or_url, service_account=args.service_account)
+    agent = DialogFlowAgent(
+        local_path_or_url=args.local_path_or_url,
+        service_account=args.service_account,
+        content_type=args.content_type,
+        output_format=args.output_format
+    )
 
     # Get intents and labels
     intents = agent.get_intents()
