@@ -286,6 +286,10 @@ def main():
 
     # Write out intents along with corresponding labels
     agent.write_intents(inp=intents, output_dir=args.output_dir)
+
+    # Collected stats
+    logger.info(f'Collected stats:')
+    logger.info(f'\tNo. collected intents = {len(intents)}')
     
 
 if __name__ == "__main__":
