@@ -149,11 +149,22 @@ class JSONIntentReader(IntentReader):
     def read(self, glob, regex=None, **kwargs):
         return self.get_reader().get_content(glob=glob, regex=regex)
 
+    def is_intent_disabled(self, intent, **kwargs):
+        priority = self.get_reader().get(intent, path='priority')
+        if priority is None:
+            return True, "is malformed: missing field priority"
+        return (priority == -1), "is disabled"
+        
+
     def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         intents = {}
         logger.info('Collecting intents.')
         for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(self.read(glob='intents/*_usersays_*.json'),
                                     self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))):
+            is_disabled, err = self.is_intent_disabled(intent)
+            if is_disabled:
+                logger.info(f'Skipping file = {filename}. Cause: {err}.')
+                continue
             label = self.get_reader().get(intent, path='name')
             if label is None:
                 logger.info(f'Cannot find a label / intent name in {filename_intent}. Skipping.')
