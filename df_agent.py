@@ -6,8 +6,9 @@ import json
 import glob
 import fnmatch
 import io
+import re
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import google
 import dialogflow_v2
@@ -99,12 +100,21 @@ class AgentContentJSONReader(AgentContentReader):
         super(AgentContentJSONReader, self).__init__(reader=reader, **kwargs)
 
     def read_json(self, fp, **kwargs):
-        pass
+        return json.load(fp)
 
-    def get_content(self, glob, **kwargs) -> List:
+    def get(self, json, path, default=None, **kwargs):
+        return json.get(path, default)
+
+    def get_content(self, glob, **kwargs) -> List[Tuple[str, dict]]:
         content = []
+        regex = kwargs.pop('regex', None)
         for filename, fp in self.reader.read(glob=glob):
-            the_json = self.read_json(fp=fp)
+            if regex is not None:
+                pattern = re.compile(regex)
+                if pattern.match(filename):
+                    content.append((filename, self.read_json(fp=fp, **kwargs)))
+            else:
+                content.append((filename, self.read_json(fp=fp, **kwargs)))
         return content
 
 
@@ -119,13 +129,44 @@ class IntentReader:
 
 class JSONIntentReader(IntentReader):
     def __init__(self, reader, **kwargs):
-        super(JSONIntentReader, self).__init__(reader=reader)
-        self.content_reader = AgentContentJSONReader(reader=self.reader)
+        super(JSONIntentReader, self).__init__(reader=reader, **kwargs)
+        self.jr = AgentContentJSONReader(reader=self.reader, **kwargs)
 
-    def get_intents(self) -> Dict[str, List[str]]:
+    def get_text(self, data, **kwargs) -> str:
+        text = []
+        if data is None:
+            return text
+        for chunk in data:
+            words = chunk.get('text', None).replace(",","").strip().split(" ")
+            if words == ['']:
+                continue
+            text.extend(words)
+        return " ".join(text)
+
+    def get_reader(self):
+        return self.jr
+
+    def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         intents = {}
-        for js in self.content_reader.get_content(glob='intents/*.json'):
-            pass
+        for ((filename, user_says), (filename_intent, intent)) in zip(self.get_reader().get_content(glob='intents/*_usersays_*.json'),
+                                    self.get_reader().get_content(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$")):
+            label = self.get_reader().get(intent, path='name')
+            if label is None:
+                logger.info(f'Cannot find a label / intent name in {filename_intent}. Skipping.')
+                continue
+            # user_says = self.get_reader().get(js, path='userSays')
+            # if user_says is None:
+            #     logger.info(f'Cannot find list of intents in {filename}. Skipping.')
+            #     continue
+            for us in user_says:
+                text = self.get_text(data=self.get_reader().get(us, path='data'))
+                if not text:
+                    logger.info(f'Found empty string for intent example in {filename}. Skipping.')
+                    continue
+                if label not in intents:
+                    intents[label] = [text]
+                else:
+                    intents[label].append(text)
         return intents
 
 
@@ -142,28 +183,37 @@ class BaseOutputFormatIntentWriter(IntentWriter):
         super(BaseOutputFormatIntentWriter, self).__init__(**kwargs)
 
     def write(self, data: Dict[str, List[str]], **kwargs):
-        base_path = kwargs.pop('output_dir', f'./data-{datetime.now().isoformat()}')
+        base_path = kwargs.pop('output_dir', None)
+        if base_path is None:
+            base_path = f'./data-{datetime.now().isoformat()}'
         if not os.path.exists(base_path):
             os.makedirs(base_path)
         with open(os.path.join(base_path, 'sent'), 'w') as sent_fp, \
             open(os.path.join(base_path, 'label'), 'w') as label_fp:
             for label, texts in data.items():
                 for text in texts:
-                    sent_fp.write(text)
-                    label_fp.write(label)
+                    sent_fp.write(f'{text}\n')
+                    label_fp.write(f'{label}\n')
 
 
 class DialogFlowAgentExport:
-    def __init__(self, local_path_or_url, dialogflow=None, **kwargs):
+    def __init__(self, local_path_or_url, dialogflow=None, content_type='json', **kwargs):
         super(DialogFlowAgentExport, self).__init__()
+        content_types = {
+            'json': JSONIntentReader
+        }
+
+        if content_type not in content_types:
+            raise ValueError(f'Cannot find content_type={content_type}.')
+
         self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url, dialogflow=dialogflow)
-        self.intents_reader = JSONIntentReader(reader=self.agent_reader)
+        self.intents_reader = content_types[content_type](reader=self.agent_reader, **kwargs)
 
-    def get_intents(self, **kwargs):
-        return self.intents_reader.get_intents()
+    def get_intents(self, **kwargs) -> Dict[str, List[str]]:
+        return self.intents_reader.get_intents(**kwargs)
 
-    def get_labels(self, **kwargs):
-        pass
+    def get_labels(self, **kwargs) -> List[str]:
+        return list(self.get_intents(**kwargs).keys())
 
 class DialogFlowAgentClient:
     def __init__(self, project_name, service_account, **kwargs):
@@ -189,17 +239,25 @@ class DialogFlowAgentClient:
         return zip_raw
 
 class DialogFlowAgent:
-    def __init__(self, local_path_or_url, service_account, **kwargs):
-        self.the_agent = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
-        self.agent_export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.the_agent)
-        self.writer = BaseOutputFormatIntentWriter()
+    def __init__(self, local_path_or_url, service_account, content_type='json', output_format='default', **kwargs):
+        output_formats = {
+            'default': BaseOutputFormatIntentWriter
+        }
 
-    def get_intents(self):
-        return self.agent_export.get_intents()
+        if output_format not in output_formats:
+            raise ValueError(f'Cannot find output_format={output_format}.')
+
+        self.df     = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
+        self.export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df, content_type=content_type)
+        self.writer = output_formats[output_format](**kwargs)
+
+    def get_intents(self, **kwargs):
+        return self.export.get_intents()
 
     def write_intents(self, **kwargs):
         intents = self.get_intents()
-        self.writer.write(data=intents, **kwargs)
+        output_dir = kwargs.pop('output_dir', None)
+        self.writer.write(data=intents, output_dir=output_dir)
 
 
 def main():
@@ -207,6 +265,8 @@ def main():
     parser.add_argument("--local_path_or_url", type=str, required=True, help="The path to local agent zip file (/dir) or gcp project name hosting dialogflow agent.")
     parser.add_argument("--service_account", type=str, required=False, help="The GCP service account path.")
     parser.add_argument("--output_dir", type=str, required=False, help="The output dir to write data to, eg intent, labels, etc..")
+    parser.add_argument("--content_type", type=str, required=False, help="The type of files to handle in the export / import df agent. Choose: json.")
+    parser.add_argument("--output_format", type=str, required=False, help="The output format to write intents out. Choose: default.")
     args = parser.parse_args()
 
     agent = DialogFlowAgent(local_path_or_url=args.local_path_or_url, service_account=args.service_account)
