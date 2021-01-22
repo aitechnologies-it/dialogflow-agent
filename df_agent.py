@@ -23,10 +23,10 @@ class AgentReader:
         super(AgentReader, self).__init__()
         self.local_path_or_url = local_path_or_url
 
-    def get_path(self):
+    def get_loc(self):
         return self.local_path_or_url
 
-    def set_path(self, path):
+    def set_loc(self, path):
         self.local_path_or_url = path
 
     def read(self, **kwargs):
@@ -54,8 +54,8 @@ class AgentReaderFromInMemoryZip(AgentReader):
         super(AgentReaderFromInMemoryZip, self).__init__(local_path_or_url, **kwargs)
 
     def _read(self, **kwargs):
-        inp = kwargs.pop('inp', None)
-        glob_pattern = kwargs.pop('glob', None)
+        inp = kwargs.pop('loc', self.get_loc())
+        glob_pattern = kwargs.pop('glob', '*')
         with zipfile.ZipFile(inp) as thezip:
             for zipinfo in thezip.infolist():
                 if fnmatch.fnmatch(zipinfo.filename, glob_pattern):
@@ -63,7 +63,7 @@ class AgentReaderFromInMemoryZip(AgentReader):
                         yield zipinfo.filename, thefile
 
     def read(self, **kwargs):
-        return self._read(inp=self.get_path(), **kwargs)
+        return self._read(loc=self.get_loc(), **kwargs)
 
 class AgentReaderFromInMemoryStreamZip(AgentReaderFromInMemoryZip):
     def __init__(self, local_path_or_url, stream, **kwargs):
@@ -74,18 +74,22 @@ class AgentReaderFromInMemoryStreamZip(AgentReaderFromInMemoryZip):
         return self.stream
 
     def read(self, **kwargs):
-        return self._read(inp=io.BytesIO(self.get_stream()), **kwargs)
+        return self._read(loc=io.BytesIO(self.get_stream()), **kwargs)
 
 class AgentReaderFromLocalDir(AgentReader):
     def __init__(self, local_path_or_url, **kwargs):
         super(AgentReaderFromLocalDir, self).__init__(local_path_or_url, **kwargs)
 
-    def read(self, **kwargs):
-        glob_pattern = kwargs.pop('glob', None)
-        file_names = glob.glob(os.path.join(self.get_path(), glob_pattern))
+    def _read(self, **kwargs):
+        inp = kwargs.pop('loc', self.get_path())
+        glob_pattern = kwargs.pop('glob', '*')
+        file_names = glob.glob(os.path.join(loc, glob_pattern))
         for filename in file_names:
             with open(filename, 'r') as fp:
                 yield filename, fp
+
+    def read(self, **kwargs):
+        return self._read(loc=self.get_path())
 
 class AgentContentReader:
     def __init__(self, reader, **kwargs):
