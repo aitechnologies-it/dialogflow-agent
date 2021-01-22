@@ -13,8 +13,6 @@ from typing import List, Dict, Tuple
 import google
 import dialogflow_v2
 
-from tqdm import tqdm
-
 logger = logging.getLogger(__name__)
 
 
@@ -133,15 +131,15 @@ class JSONIntentReader(IntentReader):
         self.jr = AgentContentJSONReader(reader=self.reader, **kwargs)
 
     def get_text(self, data, **kwargs) -> str:
-        text = []
+        text = ""
         if data is None:
-            return text
+            return None
         for chunk in data:
-            words = chunk.get('text', None).replace(",","").strip().split(" ")
-            if words == ['']:
-                continue
-            text.extend(words)
-        return " ".join(text)
+            chunk_text = chunk.get('text', None)
+            if chunk_text is None:
+                return None
+            text = text + chunk_text
+        return text
 
     def get_reader(self):
         return self.jr
@@ -154,14 +152,10 @@ class JSONIntentReader(IntentReader):
             if label is None:
                 logger.info(f'Cannot find a label / intent name in {filename_intent}. Skipping.')
                 continue
-            # user_says = self.get_reader().get(js, path='userSays')
-            # if user_says is None:
-            #     logger.info(f'Cannot find list of intents in {filename}. Skipping.')
-            #     continue
-            for us in user_says:
+            for i, us in enumerate(user_says):
                 text = self.get_text(data=self.get_reader().get(us, path='data'))
-                if not text:
-                    logger.info(f'Found empty string for intent example in {filename}. Skipping.')
+                if text is None:
+                    logger.info(f'Found something broken in {filename}. It may be due to a missing data field, or malformed chunk for sentence = {i}. Skipping.')
                     continue
                 if label not in intents:
                     intents[label] = [text]
@@ -210,10 +204,10 @@ class DialogFlowAgentExport:
         self.intents_reader = content_types[content_type](reader=self.agent_reader, **kwargs)
 
     def get_intents(self, **kwargs) -> Dict[str, List[str]]:
-        return self.intents_reader.get_intents(**kwargs)
+        return self.intents_reader.get_intents()
 
     def get_labels(self, **kwargs) -> List[str]:
-        return list(self.get_intents(**kwargs).keys())
+        return list(self.get_intents().keys())
 
 class DialogFlowAgentClient:
     def __init__(self, project_name, service_account, **kwargs):
