@@ -8,7 +8,7 @@ import fnmatch
 import io
 import re
 from datetime import datetime
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Iterator
 
 from tqdm import tqdm
 
@@ -105,18 +105,15 @@ class AgentContentJSONReader(AgentContentReader):
     def get(self, json, path, default=None, **kwargs):
         return json.get(path, default)
 
-    def get_content(self, glob, **kwargs) -> List[Tuple[str, dict]]:
-        content = []
+    def get_content(self, glob, **kwargs) -> Iterator:
         regex = kwargs.pop('regex', None)
         for filename, fp in self.reader.read(glob=glob):
             if regex is not None:
                 pattern = re.compile(regex)
                 if pattern.match(filename):
-                    content.append((filename, self.read_json(fp=fp, **kwargs)))
+                    yield (filename, self.read_json(fp=fp, **kwargs))
             else:
-                content.append((filename, self.read_json(fp=fp, **kwargs)))
-        return content
-
+                yield (filename, self.read_json(fp=fp, **kwargs))
 
 class IntentReader:
     def __init__(self, reader, **kwargs):
@@ -125,7 +122,6 @@ class IntentReader:
 
     def get_intents(self, **kwargs):
         pass
-
 
 class JSONIntentReader(IntentReader):
     def __init__(self, reader, **kwargs):
@@ -143,14 +139,17 @@ class JSONIntentReader(IntentReader):
             text = text + chunk_text
         return text
 
-    def get_reader(self):
+    def get_reader(self, **kwargs):
         return self.jr
+
+    def read(self, glob, regex=None, **kwargs):
+        return self.get_reader().get_content(glob=glob, regex=regex)
 
     def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         intents = {}
         logger.info('Collecting intents.')
-        for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(self.get_reader().get_content(glob='intents/*_usersays_*.json'),
-                                    self.get_reader().get_content(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))):
+        for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(self.read(glob='intents/*_usersays_*.json'),
+                                    self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))):
             label = self.get_reader().get(intent, path='name')
             if label is None:
                 logger.info(f'Cannot find a label / intent name in {filename_intent}. Skipping.')
@@ -166,14 +165,12 @@ class JSONIntentReader(IntentReader):
                     intents[label].append(text)
         return intents
 
-
 class IntentWriter:
     def __init__(self, **kwargs):
         super(IntentWriter, self).__init__()
     
     def write(self, data, **kwargs):
         pass
-
 
 class BaseOutputFormatIntentWriter(IntentWriter):
     def __init__(self, **kwargs):
@@ -203,15 +200,15 @@ class BaseOutputFormatIntentWriter(IntentWriter):
 class DialogFlowAgentExport:
     def __init__(self, local_path_or_url, dialogflow=None, content_type='json', **kwargs):
         super(DialogFlowAgentExport, self).__init__()
-        content_types = {
+        readers = {
             'json': JSONIntentReader
         }
 
-        if content_type not in content_types:
+        if content_type not in readers:
             raise ValueError(f'Cannot find content_type={content_type}.')
 
         self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url, dialogflow=dialogflow)
-        self.intents_reader = content_types[content_type](reader=self.agent_reader, **kwargs)
+        self.intents_reader = readers[content_type](reader=self.agent_reader, **kwargs)
 
     def get_intents(self, **kwargs) -> Dict[str, List[str]]:
         return self.intents_reader.get_intents()
@@ -245,16 +242,16 @@ class DialogFlowAgentClient:
 
 class DialogFlowAgent:
     def __init__(self, local_path_or_url, service_account, content_type='json', output_format='default', **kwargs):
-        output_formats = {
+        writers = {
             'default': BaseOutputFormatIntentWriter
         }
 
-        if output_format not in output_formats:
+        if output_format not in writers:
             raise ValueError(f'Cannot find output_format={output_format}.')
 
         self.df     = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
         self.export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df, content_type=content_type)
-        self.writer = output_formats[output_format](**kwargs)
+        self.writer = writers[output_format](**kwargs)
 
     def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         return self.export.get_intents()
