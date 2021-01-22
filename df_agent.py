@@ -1,5 +1,5 @@
 import argparse
-import logging
+import coloredlogs, logging
 import zipfile
 import os
 import json
@@ -9,6 +9,8 @@ import io
 import re
 from datetime import datetime
 from typing import List, Dict, Tuple
+
+from tqdm import tqdm
 
 import google
 import dialogflow_v2
@@ -146,8 +148,9 @@ class JSONIntentReader(IntentReader):
 
     def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         intents = {}
-        for ((filename, user_says), (filename_intent, intent)) in zip(self.get_reader().get_content(glob='intents/*_usersays_*.json'),
-                                    self.get_reader().get_content(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$")):
+        logger.info('Collecting intents.')
+        for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(self.get_reader().get_content(glob='intents/*_usersays_*.json'),
+                                    self.get_reader().get_content(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))):
             label = self.get_reader().get(intent, path='name')
             if label is None:
                 logger.info(f'Cannot find a label / intent name in {filename_intent}. Skipping.')
@@ -182,10 +185,14 @@ class BaseOutputFormatIntentWriter(IntentWriter):
             base_path = f'./data-{datetime.now().isoformat()}'
         if not os.path.exists(base_path):
             os.makedirs(base_path)
+        logger.info(f'Writing out intents to {base_path}')
         with open(os.path.join(base_path, 'sent'), 'w') as sent_fp, \
             open(os.path.join(base_path, 'label'), 'w') as label_fp:
-            for label, texts in data.items():
+            for i, (label, texts) in tqdm(enumerate(data.items())):
                 for text in texts:
+                    if not isinstance(text, str) or not isinstance(label, str):
+                        logger.info(f'Found intent name or user sentence not to be of type string. Skipping example = {i}.')
+                        continue
                     sent_fp.write(f'{text}\n')
                     label_fp.write(f'{label}\n')
 
@@ -206,7 +213,7 @@ class DialogFlowAgentExport:
     def get_intents(self, **kwargs) -> Dict[str, List[str]]:
         return self.intents_reader.get_intents()
 
-    def get_labels(self, **kwargs) -> List[str]:
+    def get_intent_names(self, **kwargs) -> List[str]:
         return list(self.get_intents().keys())
 
 class DialogFlowAgentClient:
@@ -216,8 +223,9 @@ class DialogFlowAgentClient:
         self.client = dialogflow_v2.AgentsClient.from_service_account_json(service_account)
         self.parent = self.client.project_path(project_name)
         
-    def get_agent(self):
+    def get_agent(self, **kwargs):
         zip_raw = None
+        logger.info(f'Exporting remote dialogflow agent.')
         try:
             operation = self.client.export_agent(self.parent)
             zip_raw = operation.result().agent_content
@@ -245,16 +253,23 @@ class DialogFlowAgent:
         self.export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df, content_type=content_type)
         self.writer = output_formats[output_format](**kwargs)
 
-    def get_intents(self, **kwargs):
+    def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         return self.export.get_intents()
 
-    def write_intents(self, **kwargs):
-        intents = self.get_intents()
+    def get_intent_names(self, intents: Dict[str, List[List[str]]] = None, **kwargs) -> List[str]:
+        if intents is None:
+            return self.export.get_intent_names()
+        return list(intents.keys())
+
+    def write_intents(self, inp, **kwargs):
         output_dir = kwargs.pop('output_dir', None)
-        self.writer.write(data=intents, output_dir=output_dir)
+        self.writer.write(data=inp, output_dir=output_dir)
 
 
 def main():
+    # Setup logging
+    coloredlogs.install(level='INFO', logger=logger)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_path_or_url", type=str, required=True, help="The path to local agent zip file (/dir) or gcp project name hosting dialogflow agent.")
     parser.add_argument("--service_account", type=str, required=False, help="The GCP service account path.")
@@ -263,8 +278,15 @@ def main():
     parser.add_argument("--output_format", type=str, required=False, help="The output format to write intents out. Choose: default.")
     args = parser.parse_args()
 
+    # Setup dialogflow agent
     agent = DialogFlowAgent(local_path_or_url=args.local_path_or_url, service_account=args.service_account)
-    agent.write_intents(output_dir=args.output_dir)
+
+    # Get intents and labels
+    intents = agent.get_intents()
+
+    # Write out intents along with corresponding labels
+    agent.write_intents(inp=intents, output_dir=args.output_dir)
+    
 
 if __name__ == "__main__":
     main()
