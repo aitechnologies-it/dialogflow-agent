@@ -92,16 +92,19 @@ class AgentReaderFromLocalDir(AgentReader):
         return self._read(loc=self.get_path())
 
 class AgentContentReader:
-    def __init__(self, reader, **kwargs):
+    def __init__(self, agent_reader, **kwargs):
         super(AgentContentReader, self).__init__()
-        self.reader = reader
+        self.agent_reader = agent_reader
     
     def get_content(self, glob, **kwargs):
         pass
+
+    def get_reader(self):
+        return self.agent_reader
             
 class AgentContentJSONReader(AgentContentReader):
-    def __init__(self, reader, **kwargs):
-        super(AgentContentJSONReader, self).__init__(reader=reader, **kwargs)
+    def __init__(self, agent_reader, **kwargs):
+        super(AgentContentJSONReader, self).__init__(agent_reader=agent_reader, **kwargs)
 
     def read_json(self, fp, **kwargs):
         return json.load(fp)
@@ -111,7 +114,7 @@ class AgentContentJSONReader(AgentContentReader):
 
     def get_content(self, glob, **kwargs) -> Iterator:
         regex = kwargs.pop('regex', None)
-        for filename, fp in self.reader.read(glob=glob):
+        for filename, fp in self.get_reader().read(glob=glob):
             if regex is not None:
                 pattern = re.compile(regex)
                 if pattern.match(filename):
@@ -120,17 +123,19 @@ class AgentContentJSONReader(AgentContentReader):
                 yield (filename, self.read_json(fp=fp, **kwargs))
 
 class IntentReader:
-    def __init__(self, reader, **kwargs):
+    def __init__(self, **kwargs):
         super(IntentReader, self).__init__()
-        self.reader = reader
 
     def get_intents(self, **kwargs):
         pass
 
 class JSONIntentReader(IntentReader):
-    def __init__(self, reader, **kwargs):
-        super(JSONIntentReader, self).__init__(reader=reader, **kwargs)
-        self.jr = AgentContentJSONReader(reader=self.reader, **kwargs)
+    def __init__(self, agent_reader, **kwargs):
+        super(JSONIntentReader, self).__init__()
+        self.json_reader = AgentContentJSONReader(agent_reader=agent_reader, **kwargs)
+
+    def get_reader(self):
+        return self.json_reader
 
     def get_text(self, data, **kwargs) -> str:
         text = ""
@@ -143,9 +148,6 @@ class JSONIntentReader(IntentReader):
             text = text + chunk_text
         return text
 
-    def get_reader(self, **kwargs):
-        return self.jr
-
     def read(self, glob, regex=None, **kwargs):
         return self.get_reader().get_content(glob=glob, regex=regex)
 
@@ -155,7 +157,6 @@ class JSONIntentReader(IntentReader):
             return True, "is malformed: missing field priority"
         return (priority == -1), "is disabled"
         
-
     def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
         intents = {}
         logger.info('Collecting intents.')
@@ -223,7 +224,7 @@ class DialogFlowAgentExport:
             raise ValueError(f'Cannot find content_type={content_type}.')
 
         self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url, dialogflow=dialogflow)
-        self.intents_reader = readers[content_type](reader=self.agent_reader, **kwargs)
+        self.intents_reader = readers[content_type](agent_reader=self.agent_reader, **kwargs)
 
     def get_intents(self, **kwargs) -> Dict[str, List[str]]:
         return self.intents_reader.get_intents()
