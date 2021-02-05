@@ -1,4 +1,3 @@
-import argparse
 import coloredlogs, logging
 import zipfile
 import os
@@ -8,7 +7,8 @@ import fnmatch
 import io
 import re
 from datetime import datetime
-from typing import List, Dict, Tuple, Iterator
+from typing import List, Dict, Tuple, Iterator, Optional, Union
+from dataclasses import dataclass
 
 from tqdm import tqdm
 
@@ -16,7 +16,22 @@ import google
 import dialogflow_v2
 
 logger = logging.getLogger(__name__)
+# Setup logging
+coloredlogs.install(level='INFO', logger=logger)
 
+IGNORE_TAG = '@sys.ignore'
+
+@dataclass
+class DialoflowTrainingExample:
+    """Class for modeling Dialogflow training examples."""
+    text: str
+    label: str
+    tag: str
+
+    def from_dict(inp: dict):
+        if not isinstance(inp, dict):
+            raise TypeError(f'Argument inp must be dict, not a {type(inp)}.')
+        return DialoflowTrainingExample(text=inp.get('text'), label=inp.get('label'), tag=inp.get('tag'))
 
 class AgentReader:
     def __init__(self, local_path_or_url, **kwargs):
@@ -137,16 +152,113 @@ class JSONIntentReader(IntentReader):
     def get_reader(self):
         return self.json_reader
 
-    def get_text(self, data, **kwargs) -> str:
+    def preprocessing(self, text: str) -> str:
+        text = text.split()
+        output = []
+        for token in text:
+            if token not in (',', '.', '!', ':'):
+                output.append(token)
+        return ' '.join(output)
+
+    def get_text(self, data: List, **kwargs) -> str:
         text = ""
         if data is None:
             return None
+        if not isinstance(data, List):
+            raise TypeError(f'Argument data must be a list not a {type(data)}.')
         for chunk in data:
             chunk_text = chunk.get('text', None)
             if chunk_text is None:
                 return None
+            if not isinstance(chunk_text, str):
+                return None
             text = text + chunk_text
         return text
+
+    def is_first_token_dangling_contraction(self, inp: Union[List[str], str], is_split_into_words=False, output_str=True) -> Union[List[str], str]:
+        """ Checks if a string contains as first token part of a previously split contraction, eg. if a string <<don't play>> has been split into strings <<don>> and <<'t play>>, then <<'t>> is a dangling contraction token."""
+        if not isinstance(inp, (str, List, )):
+            raise TypeError(f'Argument inp must be a list or a string not a {type(inp)}.')
+        if isinstance(inp, List) and not isinstance(inp[0], str):
+            raise TypeError(f'Argument inp must be a list of strings and not a list of {type(inp[0])}.')
+        if not is_split_into_words:
+            if isinstance(inp, List):
+                logging.warning(f'You set is_split_into_words={is_split_into_words} but argument inp is already a list.')
+            else:
+                inp = inp.split()
+        if len(inp) == 0:
+            return False
+        first_token = inp[0]
+        first_token_n_chars = len(first_token)
+        if first_token_n_chars == 0:
+            return False
+        first_token_begin_char = first_token[0]
+        return first_token_begin_char in ('\u0027', )
+
+    def collate_ignore_chunks(self, data, **kwargs):
+        if data is None:
+            return None
+        n_chunks = len(data)
+        prev_chunk_text_ignored = ""
+        chunk_list = []
+        for i, chunk in enumerate(data):
+            chunk_text = chunk.get('text', None)
+            if chunk_text is not None:
+                meta_tag = chunk.get('meta', None)
+                if meta_tag is None or (meta_tag is not None and meta_tag in (IGNORE_TAG, )):
+                    prev_chunk_text_ignored += chunk_text
+                if (meta_tag is not None and not meta_tag in (IGNORE_TAG, )):
+                    chunk_list.append({'text': prev_chunk_text_ignored, 'userDefined': False})
+                    chunk_list.append(chunk)
+                    prev_chunk_text_ignored = ""
+                elif i == n_chunks-1:
+                    chunk_list.append({'text': prev_chunk_text_ignored, 'userDefined': False})
+                    prev_chunk_text_ignored = ""
+        return chunk_list
+
+    def get_tag(self, data, **kwargs) -> str:
+        def default_tag(length: int) -> List[str]:
+            if length <= 0:
+                return []
+            return (['O'] * length)
+
+        if data is None:
+            return None
+        
+        # preprocessing step required to remove googshit
+        data = self.collate_ignore_chunks(data)
+
+        tag = []
+        prev_chunk_text_ignored = ""
+        n_chunks = len(data)
+        for i, chunk in enumerate(data):
+            chunk_text = chunk.get('text', None)
+            meta_tag   = chunk.get('meta', None)
+            if chunk_text is None:
+                return None
+            chunk_text = self.preprocessing(chunk_text)
+            chunk_text_split = chunk_text.split()
+            chunk_text_n_words = len(chunk_text_split)
+            # HACK(fix correct size of chunk of text to avoid tagging a token being instead a danling contraction and compute correct number of tag require for current chunk of text. Example:
+            # chunk text <<\u0027t know my customer user id>> has dangling contraction token \u0027t that is part of previous chunk of text final token, eg '... don'.
+            # Token \u0027t will be glued together with a word in the previous chunk of text during intent retrieval.)
+            # if self.is_first_token_dangling_contraction(chunk_text_split, is_split_into_words=True):
+            #    chunk_text_n_words -= 1
+            # makes no sense making a tag with a chunk of text made only of dangling tokens related to previous or an empty (?) chunk of text
+            if chunk_text_n_words == 0:
+                continue
+            if meta_tag is None:
+                tag.extend(default_tag(length=chunk_text_n_words))
+            else:
+                # Set to 'O'-tag non interesting tags, eg @sys.ignore
+                if not meta_tag in (IGNORE_TAG, ):
+                    # meta_tag is of the form @games, we do remove the '@'
+                    tag_name = meta_tag[1:]
+                    tag.extend([f'B-{tag_name}'] + [f'I-{tag_name}']*(chunk_text_n_words-1))
+        return ' '.join(tag)
+
+    def get(self, json, path, default=None, **kwargs) -> Dict:
+        return self.get_reader().get(json, path, default)
 
     def read(self, glob, regex=None, **kwargs):
         return self.get_reader().get_content(glob=glob, regex=regex)
@@ -157,8 +269,8 @@ class JSONIntentReader(IntentReader):
             return True, "is malformed: missing field priority"
         return (priority == -1), "is disabled"
         
-    def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
-        intents = {}
+    def get_intents(self, **kwargs) -> List[Dict[str, str]]:
+        intents = []
         logger.info('Collecting intents.')
         for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(self.read(glob='intents/*_usersays_*.json'),
                                     self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))):
@@ -166,19 +278,25 @@ class JSONIntentReader(IntentReader):
             if is_disabled:
                 logger.info(f'Skipping file = {filename}. Cause: {err}.')
                 continue
-            label = self.get_reader().get(intent, path='name')
+            label = self.get(intent, path='name')
             if label is None:
                 logger.info(f'Cannot find a label / intent name in {filename_intent}. Skipping.')
                 continue
             for i, us in enumerate(user_says):
-                text = self.get_text(data=self.get_reader().get(us, path='data'))
-                if text is None:
+                data_content = self.get(us, path='data')
+                sentence = self.preprocessing(self.get_text(data=data_content))
+                if sentence is None:
                     logger.info(f'Found something broken in {filename}. It may be due to a missing data field, or malformed chunk for sentence = {i}. Skipping.')
                     continue
-                if label not in intents:
-                    intents[label] = [text]
-                else:
-                    intents[label].append(text)
+                tag = self.get_tag(data=data_content)
+                if tag is not None and len(sentence.split()) != len(tag.split()):
+                    raise ValueError(f'Something wrong. Example={i} - Intent={label}: len sentence ({len(sentence.split())}) != len tag ({len(tag.split())}).\n'
+                            + f'sentence: <<{sentence}>> - tag: <<{tag}>>')
+                intents.append({
+                    'text': sentence,
+                    'label': label,
+                    'tag': tag
+                })
         return intents
 
 class IntentWriter:
@@ -192,26 +310,23 @@ class BaseOutputFormatIntentWriter(IntentWriter):
     def __init__(self, **kwargs):
         super(BaseOutputFormatIntentWriter, self).__init__(**kwargs)
 
-    def write(self, data: Dict[str, List[str]], **kwargs):
-        base_path = kwargs.pop('output_dir', None)
-        if base_path is None:
-            base_path = f'./data-{datetime.now().isoformat()}'
-        if not os.path.exists(base_path):
-            os.makedirs(base_path)
-        logger.info(f'Writing out intents to {base_path}')
-        with open(os.path.join(base_path, 'sent'), 'w') as sent_fp, \
-            open(os.path.join(base_path, 'label'), 'w') as label_fp:
-            for i, (label, texts) in tqdm(enumerate(data.items())):
-                for text in texts:
-                    if not isinstance(text, str) or not isinstance(label, str):
+    def write(self, data: List[DialoflowTrainingExample], output_dir: str =None, **kwargs):
+        if output_dir is None:
+            output_dir = f'./data-{datetime.now().isoformat()}'
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        logger.info(f'Writing out intents to {output_dir}')
+        with open(os.path.join(output_dir, 'sent'), 'w+') as sent_fp, \
+                open(os.path.join(output_dir, 'label'), 'w+') as label_fp, \
+                open(os.path.join(output_dir, 'tag'), 'w+') as tag_fp:
+                for i, example in tqdm(enumerate(data)):
+                    if not isinstance(example.text, str) or not isinstance(example.label, str):
                         logger.info(f'Found intent name or user sentence not to be of type string. Skipping example = {i}.')
                         continue
-                    if not text or not label:
-                        logger.info(f'Found intent name or user sentence not to empty string. Skipping example = {i}.')
-                        continue
-                    sent_fp.write(f'{text}\n')
-                    label_fp.write(f'{label}\n')
-
+                    sent_fp.write(f'{example.text}\n')
+                    label_fp.write(f'{example.label}\n')
+                    if example.tag is not None:
+                        tag_fp.write(f'{example.tag}\n')
 
 class DialogFlowAgentExport:
     def __init__(self, local_path_or_url, dialogflow=None, content_type='json', **kwargs):
@@ -226,11 +341,8 @@ class DialogFlowAgentExport:
         self.agent_reader   = AgentReader.from_dir_or_url(local_path_or_url=local_path_or_url, dialogflow=dialogflow)
         self.intents_reader = readers[content_type](agent_reader=self.agent_reader, **kwargs)
 
-    def get_intents(self, **kwargs) -> Dict[str, List[str]]:
+    def get_intents(self, **kwargs) -> List[Dict[str, str]]:
         return self.intents_reader.get_intents()
-
-    def get_intent_names(self, **kwargs) -> List[str]:
-        return list(self.get_intents().keys())
 
 class DialogFlowAgentClient:
     def __init__(self, project_name, service_account, **kwargs):
@@ -261,62 +373,21 @@ class DialogFlowAgent:
         writers = {
             'default': BaseOutputFormatIntentWriter
         }
-
         if output_format not in writers:
             raise ValueError(f'Cannot find output_format={output_format}.')
 
-        self.df     = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
-        self.export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df, content_type=content_type)
-        self.writer = writers[output_format](**kwargs)
+        self.df_client = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
+        self.df_export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df_client, content_type=content_type)
+        self.writer    = writers[output_format](**kwargs)
 
-    def get_intents(self, **kwargs) -> Dict[str, List[List[str]]]:
-        return self.export.get_intents()
+    def _get_intents(self, **kwargs) -> List[Dict[str, str]]:
+        return self.df_export.get_intents()
 
-    def get_intent_names(self, intents: Dict[str, List[List[str]]] = None, **kwargs) -> List[str]:
-        if intents is None:
-            return self.export.get_intent_names()
-        return list(intents.keys())
+    def save_training_examples(self, examples, output_dir, **kwargs):
+        self.writer.write(data=examples, output_dir=output_dir)
 
-    def write_intents(self, inp, **kwargs):
-        output_dir = kwargs.pop('output_dir', None)
-        self.writer.write(data=inp, output_dir=output_dir)
-
-
-def main():
-    # Setup logging
-    coloredlogs.install(level='INFO', logger=logger)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--local_path_or_url", type=str, required=True, help="The path to local agent zip file (/dir) or gcp project name hosting dialogflow agent.")
-    parser.add_argument("--service_account", type=str, required=False, help="The GCP service account path.")
-    parser.add_argument("--output_dir", type=str, required=False, help="The output dir to write data to, eg intent, labels, etc..")
-    parser.add_argument("--content_type", type=str, default='json', required=False, help="The type of files to handle in the export / import df agent. Choose: json.")
-    parser.add_argument("--output_format", type=str, default='default', required=False, help="The output format to write intents out. Choose: default.")
-    args = parser.parse_args()
-
-    logger.warning(f"Arguments: local_path_or_url={args.local_path_or_url}"
-                            f" - service account={args.service_account} - output_dir={args.output_dir}"
-                            f" - content_type={args.content_type} - output_format={args.output_format}")
-
-    # Setup dialogflow agent
-    agent = DialogFlowAgent(
-        local_path_or_url=args.local_path_or_url,
-        service_account=args.service_account,
-        content_type=args.content_type,
-        output_format=args.output_format
-    )
-
-    # Get intents and labels
-    intents = agent.get_intents()
-
-    # Write out intents along with corresponding labels
-    agent.write_intents(inp=intents, output_dir=args.output_dir)
-
-    # Collected stats
-    logger.info(f'Collected stats:')
-    logger.info(f'\tNo. collected intents = {len(intents)}')
-    
-
-if __name__ == "__main__":
-    main()
-
+    def get_training_examples(self, **kwargs) -> List[DialoflowTrainingExample]:
+        df_examples = []
+        for i, example in enumerate(self._get_intents()):
+            df_examples.append(DialoflowTrainingExample.from_dict(example))
+        return df_examples
