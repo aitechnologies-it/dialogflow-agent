@@ -28,7 +28,7 @@ agent = dfagent.DialogFlowAgent(
 
 In case you already have exported your Dialogflow on your local computer, you can give as local_path_or_url the path to the zip or unzipped exported agent.
 
-Then you can get a list of dialogflow examples as follows and save as follows
+Then you can get a list of dialogflow examples for saving as follows
 
 ```Python
 examples = agent.get_training_examples()
