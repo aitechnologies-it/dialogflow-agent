@@ -152,13 +152,17 @@ class JSONIntentReader(IntentReader):
     def get_reader(self):
         return self.json_reader
 
+    # def preprocessing(self, text: str) -> str:
+    #     text = text.split()
+    #     output = []
+    #     for token in text:
+    #         if token not in (',', '.', '!', ':'):
+    #             output.append(token)
+    #     return ' '.join(output)
     def preprocessing(self, text: str) -> str:
-        text = text.split()
-        output = []
-        for token in text:
-            if token not in (',', '.', '!', ':'):
-                output.append(token)
-        return ' '.join(output)
+        clean = [re.sub(r"[^a-zA-Z0-9]+", ' ', text)]
+        clean = " ".join(clean).strip()
+        return clean
 
     def get_text(self, data: List, **kwargs) -> str:
         text = ""
