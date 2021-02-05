@@ -1,4 +1,4 @@
-pip install -r requirements.txt
+./install.sh
 
 LOCAL_OR_REMOTE="plg-chatbot"
 SERVICE_ACCOUNT="./dialogflow-fcqosk-plg-chatbot.json"

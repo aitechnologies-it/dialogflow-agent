@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 # Setup logging
 coloredlogs.install(level='INFO', logger=logger)
 
-IGNORE_TAG = '@sys.ignore'
-
 @dataclass
 class DialoflowTrainingExample:
     """Class for modeling Dialogflow training examples."""
@@ -148,17 +146,11 @@ class JSONIntentReader(IntentReader):
     def __init__(self, agent_reader, **kwargs):
         super(JSONIntentReader, self).__init__()
         self.json_reader = AgentContentJSONReader(agent_reader=agent_reader, **kwargs)
+        self.IGNORE_TAG = '@sys.ignore'
 
     def get_reader(self):
         return self.json_reader
 
-    # def preprocessing(self, text: str) -> str:
-    #     text = text.split()
-    #     output = []
-    #     for token in text:
-    #         if token not in (',', '.', '!', ':'):
-    #             output.append(token)
-    #     return ' '.join(output)
     def preprocessing(self, text: str) -> str:
         clean = [re.sub(r"[^a-zA-Z0-9]+", ' ', text)]
         clean = " ".join(clean).strip()
@@ -209,9 +201,9 @@ class JSONIntentReader(IntentReader):
             chunk_text = chunk.get('text', None)
             if chunk_text is not None:
                 meta_tag = chunk.get('meta', None)
-                if meta_tag is None or (meta_tag is not None and meta_tag in (IGNORE_TAG, )):
+                if meta_tag is None or (meta_tag is not None and meta_tag in (self.IGNORE_TAG, )):
                     prev_chunk_text_ignored += chunk_text
-                if (meta_tag is not None and not meta_tag in (IGNORE_TAG, )):
+                if (meta_tag is not None and not meta_tag in (self.IGNORE_TAG, )):
                     chunk_list.append({'text': prev_chunk_text_ignored, 'userDefined': False})
                     chunk_list.append(chunk)
                     prev_chunk_text_ignored = ""
@@ -254,8 +246,8 @@ class JSONIntentReader(IntentReader):
             if meta_tag is None:
                 tag.extend(default_tag(length=chunk_text_n_words))
             else:
-                # Set to 'O'-tag non interesting tags, eg @sys.ignore
-                if not meta_tag in (IGNORE_TAG, ):
+                # There is no need to check if it's a IGNORE_TAG because we've removed such chunks during collate_ignore_chunks
+                if not meta_tag in (self.IGNORE_TAG, ):
                     # meta_tag is of the form @games, we do remove the '@'
                     tag_name = meta_tag[1:]
                     tag.extend([f'B-{tag_name}'] + [f'I-{tag_name}']*(chunk_text_n_words-1))
