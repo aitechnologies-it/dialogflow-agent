@@ -11,7 +11,7 @@ To install the dfagent package you only need to run [install.sh](install.sh) scr
 
 ## Usage
 
-Once dfagent is installed you can simply import it in your code. The following snipped illustrates a simple example to get and save training examples from an online Dialogflow agent.
+Once dfagent is installed you can simply import it in your code. The following snippet illustrates a simple example to get and save training examples from an online Dialogflow agent.
 
 To create a Dialogflow agent you only need that
 
@@ -26,9 +26,12 @@ agent = dfagent.DialogFlowAgent(
     )
 ```
 
+In case you already have exported your Dialogflow on your local computer, you can give as local_path_or_url the path to the zip or unzipped exported agent.
+
 Then you can get a list of dialogflow examples as follows and save as follows
 
 ```Python
 examples = agent.get_training_examples()
 agent.save_training_examples(examples, output_dir='path/to/dir')
 ```
+
