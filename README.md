@@ -1,5 +1,5 @@
-# dfagent
-Dialogflow agent is a library for online / offline handling of dialogflow agents. You can retrieve training examples and save into the preferred format.
+# dfagent 🤖
+The dfagent is a package for the handling of Dialogflow agents. You can retrieve training examples and save into a preferred format.
 
 ## Overview
 
