@@ -19,11 +19,11 @@ To create a Dialogflow agent you only need that
 import dfagent
 
 agent = dfagent.DialogFlowAgent(
-        local_path_or_url='project_name',
-        service_account='path/to/dir/',
-        content_type='json',
-        output_format='default'
-    )
+    local_path_or_url='project_name',
+    service_account='path/to/dir/',
+    content_type='json',
+    output_format='default'
+)
 ```
 
 In case you already have exported your Dialogflow on your local computer, you can give as local_path_or_url the path to the zip or unzipped exported agent.
