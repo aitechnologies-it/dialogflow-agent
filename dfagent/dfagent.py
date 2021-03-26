@@ -1,3 +1,4 @@
+import unicodedata
 import coloredlogs, logging
 import zipfile
 import os
@@ -151,8 +152,30 @@ class JSONIntentReader(IntentReader):
     def get_reader(self):
         return self.json_reader
 
-    def preprocessing(self, text: str) -> str:
-        clean = [re.sub(r"[^a-zA-Z0-9]+", ' ', text)]
+    @staticmethod
+    def preprocessing_intent(text: str) -> str:
+        clean = text.strip()
+        clean = JSONIntentReader.unicode_normalize(clean)
+        return clean
+
+    @staticmethod
+    def preprocessing_tag(text: str) -> str:
+        clean = text.strip()
+        clean = JSONIntentReader.unicode_normalize(clean)
+        clean = JSONIntentReader.remove_special(clean)
+        return clean
+
+    @staticmethod
+    def unicode_normalize(text: str) -> str:
+        text = str(text)
+        text = unicodedata.normalize('NFD', text) \
+            .encode('ascii', 'ignore') \
+            .decode("utf-8")
+        return str(text)
+
+    @staticmethod
+    def remove_special(text: str) -> str:
+        clean = [re.sub(r"[^a-zA-Z0-9 ]+", '', text)]
         clean = " ".join(clean).strip()
         return clean
 
@@ -225,15 +248,14 @@ class JSONIntentReader(IntentReader):
         data = self.collate_ignore_chunks(data)
 
         tag = []
-        prev_chunk_text_ignored = ""
-        n_chunks = len(data)
         for i, chunk in enumerate(data):
             chunk_text = chunk.get('text', None)
             meta_tag   = chunk.get('meta', None)
             if chunk_text is None:
                 return None
-            chunk_text = self.preprocessing(chunk_text)
-            chunk_text_split = chunk_text.split()
+            chunk_text = self.preprocessing_tag(chunk_text)
+            chunk_text_clean = self.remove_special(chunk_text)
+            chunk_text_split = chunk_text_clean.split()
             chunk_text_n_words = len(chunk_text_split)
             # HACK(fix correct size of chunk of text to avoid tagging a token being instead a danling contraction and compute correct number of tag require for current chunk of text. Example:
             # chunk text <<\u0027t know my customer user id>> has dangling contraction token \u0027t that is part of previous chunk of text final token, eg '... don'.
@@ -280,7 +302,7 @@ class JSONIntentReader(IntentReader):
                 continue
             for i, us in enumerate(user_says):
                 data_content = self.get(us, path='data')
-                sentence = self.preprocessing(self.get_text(data=data_content))
+                sentence = self.preprocessing_intent(self.get_text(data=data_content))
                 if sentence is None:
                     logger.info(f'Found something broken in {filename}. It may be due to a missing data field, or malformed chunk for sentence = {i}. Skipping.')
                     continue
