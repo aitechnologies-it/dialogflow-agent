@@ -95,15 +95,23 @@ class AgentReaderFromLocalDir(AgentReader):
         super(AgentReaderFromLocalDir, self).__init__(local_path_or_url, **kwargs)
 
     def _read(self, **kwargs):
-        inp = kwargs.pop('loc', self.get_path())
+        loc = kwargs.pop('loc', self.get_loc())
         glob_pattern = kwargs.pop('glob', '*')
         file_names = glob.glob(os.path.join(loc, glob_pattern))
+        file_names = sorted(file_names)
         for filename in file_names:
+            # # IN CASE YOU EVER NEED TO RECURSIVELY GO DOWN
+            # if os.path.isdir(filename):
+            #     for _, _, files in os.walk(filename):
+            #         files = sorted(files)
+            #         for sub_filename in files:
+            #             with open(os.path.join(filename, sub_filename), 'r') as fp:
+            #                 yield sub_filename, fp
             with open(filename, 'r') as fp:
                 yield filename, fp
 
     def read(self, **kwargs):
-        return self._read(loc=self.get_path())
+        return self._read(loc=self.get_loc(), **kwargs)
 
 class AgentContentReader:
     def __init__(self, agent_reader, **kwargs):
@@ -290,8 +298,9 @@ class JSONIntentReader(IntentReader):
     def get_intents(self, **kwargs) -> List[Dict[str, str]]:
         intents = []
         logger.info('Collecting intents.')
-        for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(self.read(glob='intents/*_usersays_*.json'),
-                                    self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))):
+        usersays_data: Tuple[str, List[dict]] = self.read(glob='intents/*_usersays_*.json')
+        intent_data: Tuple[str, dict] = self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$")
+        for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
             is_disabled, err = self.is_intent_disabled(intent)
             if is_disabled:
                 logger.info(f'Skipping file = {filename}. Cause: {err}.')
