@@ -2,7 +2,7 @@
 
 LOCAL_OR_REMOTE="plg-chatbot"
 SERVICE_ACCOUNT="./credentials/dialogflow-fcqosk-plg-chatbot.json"
-OUTPUT_DIR="../ml-artifacts/datasets/bet9ja"
+OUTPUT_DIR="../ml-artifacts/data/bet9ja"
 
 echo "Downloading dialogflow sentences. Project = ${LOCAL_OR_REMOTE}. Output dir = ${OUTPUT_DIR}"
 
