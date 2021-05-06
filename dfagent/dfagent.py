@@ -302,6 +302,8 @@ class JSONIntentReader(IntentReader):
 
         usersays_data: List[str, List[dict]] = list(self.read(glob='intents/*_usersays_*.json'))
         intent_data: List[Tuple[str, dict]] = list(self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))
+        assert len(usersays_data) == len(intent_data), f"usersays files {len(usersays_data)} != {len(intent_data)} intent files. There would be disalignments"
+        usersays_data = [(f.replace("_usersays_es", ""),y) for (f,y) in usersays_data]
         usersays_data.sort(key=operator.itemgetter(0))
         intent_data.sort(key=operator.itemgetter(0))
         for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
