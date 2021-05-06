@@ -2,7 +2,7 @@
 
 LOCAL_OR_REMOTE="chatbot-colombia-int-301508"
 SERVICE_ACCOUNT="./credentials/dialogflow-int-colombia-int-301508.json"
-OUTPUT_DIR="../ml-artifacts/datasets/colombia"
+OUTPUT_DIR="../ml-artifacts/data/colombia"
 
 echo "Downloading dialogflow sentences. Project = ${LOCAL_OR_REMOTE}. Output dir = ${OUTPUT_DIR}"
 
