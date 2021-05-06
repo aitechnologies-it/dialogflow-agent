@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 from typing import List, Dict, Tuple, Iterator, Optional, Union
 from dataclasses import dataclass
+import operator
 
 from tqdm import tqdm
 
@@ -298,8 +299,11 @@ class JSONIntentReader(IntentReader):
     def get_intents(self, **kwargs) -> List[Dict[str, str]]:
         intents = []
         logger.info('Collecting intents.')
-        usersays_data: Tuple[str, List[dict]] = self.read(glob='intents/*_usersays_*.json')
-        intent_data: Tuple[str, dict] = self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$")
+
+        usersays_data: List[str, List[dict]] = list(self.read(glob='intents/*_usersays_*.json'))
+        intent_data: List[Tuple[str, dict]] = list(self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))
+        usersays_data.sort(key=operator.itemgetter(0))
+        intent_data.sort(key=operator.itemgetter(0))
         for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
             is_disabled, err = self.is_intent_disabled(intent)
             if is_disabled:
