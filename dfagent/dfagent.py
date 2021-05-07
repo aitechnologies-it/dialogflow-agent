@@ -294,8 +294,13 @@ class JSONIntentReader(IntentReader):
         priority = self.get_reader().get(intent, path='priority')
         if priority is None:
             return True, "is malformed: missing field priority"
-        return (priority == -1), "is disabled"
-        
+        return (priority == -1)
+
+    def is_filtered(self, intent, filter_intents=[]):
+        filter_intents = [] if filter_intents is None else filter_intents
+        intent_name = self.get_reader().get(intent, path='name')
+        return intent_name in filter_intents
+
     def get_intents(self, **kwargs) -> List[Dict[str, str]]:
         intents = []
         logger.info('Collecting intents.')
@@ -307,9 +312,13 @@ class JSONIntentReader(IntentReader):
         usersays_data.sort(key=operator.itemgetter(0))
         intent_data.sort(key=operator.itemgetter(0))
         for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
-            is_disabled, err = self.is_intent_disabled(intent)
+            is_disabled = self.is_intent_disabled(intent)
             if is_disabled:
-                logger.info(f'Skipping file = {filename}. Cause: {err}.')
+                logger.info(f'Skipping file = {filename}. Cause: Disabled on DialogFlow.')
+                continue
+            is_filtered = self.is_filtered(intent, filter_intents=kwargs.get("filter_intents"))
+            if is_filtered:
+                logger.info(f'Skipping file = {filename}. Cause: Disabled via argument.')
                 continue
             label = self.get(intent, path='name')
             if label is None:
@@ -375,7 +384,7 @@ class DialogFlowAgentExport:
         self.intents_reader = readers[content_type](agent_reader=self.agent_reader, **kwargs)
 
     def get_intents(self, **kwargs) -> List[Dict[str, str]]:
-        return self.intents_reader.get_intents()
+        return self.intents_reader.get_intents(filter_intents=kwargs.get("filter_intents"))
 
 class DialogFlowAgentClient:
     def __init__(self, project_name, service_account, **kwargs):
@@ -414,13 +423,13 @@ class DialogFlowAgent:
         self.writer    = writers[output_format](**kwargs)
 
     def _get_intents(self, **kwargs) -> List[Dict[str, str]]:
-        return self.df_export.get_intents()
+        return self.df_export.get_intents(filter_intents=kwargs.get("filter_intents"))
 
     def save_training_examples(self, examples, output_dir, **kwargs):
         self.writer.write(data=examples, output_dir=output_dir)
 
     def get_training_examples(self, **kwargs) -> List[DialoflowTrainingExample]:
         df_examples = []
-        for i, example in enumerate(self._get_intents()):
+        for i, example in enumerate(self._get_intents(filter_intents=kwargs.get("filter_intents"))):
             df_examples.append(DialoflowTrainingExample.from_dict(example))
         return df_examples

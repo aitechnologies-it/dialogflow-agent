@@ -15,11 +15,13 @@ def main():
     parser.add_argument("--output_dir", type=str, required=False, help="The output dir to write data to, eg intent, labels, etc..")
     parser.add_argument("--content_type", type=str, default='json', required=False, help="The type of files to handle in the export / import df agent. Choose: json.")
     parser.add_argument("--output_format", type=str, default='default', required=False, help="The output format to write intents out. Choose: default.")
+    parser.add_argument('--filter_intents', nargs='*', help='The intents to ignore', required=False)
     args = parser.parse_args()
 
     logger.warning(f"Arguments: local_path_or_url={args.local_path_or_url}"
-                            f" - service account={args.service_account} - output_dir={args.output_dir}"
-                            f" - content_type={args.content_type} - output_format={args.output_format}")
+            f" - service account={args.service_account} - output_dir={args.output_dir}"
+            f" - content_type={args.content_type} - output_format={args.output_format}"
+            f" - filter_intents={args.filter_intents}")
 
     # Setup dialogflow agent
     agent = dfagent.DialogFlowAgent(
@@ -30,7 +32,7 @@ def main():
     )
 
     # Get Dialogflow examples to save in specified output directory for later use
-    examples = agent.get_training_examples()
+    examples = agent.get_training_examples(filter_intents=args.filter_intents)
     agent.save_training_examples(examples, output_dir=args.output_dir)
 
     # Collected stats
