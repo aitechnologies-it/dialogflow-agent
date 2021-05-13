@@ -451,12 +451,19 @@ class DialogFlowIntentClient:
         self.client = dialogflow_v2.IntentsClient.from_service_account_json(service_account)
         self.parent = f"projects/{project_name}/agent"
     
-    def get_intents(self, **kwargs):
+    def list_intents(self, **kwargs):
         intents = self.client.list_intents(
             parent=self.parent,
             intent_view=dialogflow_v2.enums.IntentView.INTENT_VIEW_FULL
         )
         return intents
+
+    def update_intent(self, intent, language_code, **kwargs):
+        response = self.client.update_intent(
+            intent=intent,
+            language_code=language_code
+        )
+        return response
 
 class DialogFlowAgent:
     def __init__(self, 
@@ -505,7 +512,7 @@ class DialogFlowAgent:
             examples_as_parts.append(dialogflow_v2.types.Intent.TrainingPhrase(parts=parts))
         
         # get intent to update
-        intents  = self.df_intent.get_intents()
+        intents = self.df_intent.list_intents()
         for intent in intents:
             if intent.display_name == intent_name:
                 intent.training_phrases.extend(examples_as_parts)
@@ -517,6 +524,6 @@ class DialogFlowAgent:
 
     def get_training_examples(self, **kwargs) -> List[DialoflowTrainingExample]:
         df_examples = []
-        for i, example in enumerate(self._get_intents(filter_intents=kwargs.get("filter_intents"))):
+        for example in self._get_intents(filter_intents=kwargs.get("filter_intents")):
             df_examples.append(DialoflowTrainingExample.from_dict(example))
         return df_examples

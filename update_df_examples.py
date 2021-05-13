@@ -29,16 +29,16 @@ def main():
     )
 
     # Updating DialoFlow with new training examples.
-    res, examples, _ = agent.add_training_examples(
+    response, examples, _ = agent.add_training_examples(
         intent_name=args.intent_name,
         input_dir_or_file=args.input_dir_or_file,
     )
 
     # Collected stats
-    logger.info(response)
+    logger.info(f"Response from IntentsClient:\n-----\n{response}-----")
     logger.info(f'no. added examples = {len(examples)}')
     logger.info(f'Done.')
-    
+
 
 if __name__ == "__main__":
     main()
