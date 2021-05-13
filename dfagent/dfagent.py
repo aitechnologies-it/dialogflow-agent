@@ -370,6 +370,39 @@ class BaseOutputFormatIntentWriter(IntentWriter):
                     if example.tag is not None:
                         tag_fp.write(f'{example.tag}\n')
 
+
+class ExampleReader:
+    def __init__(self, **kwargs):
+        super(ExampleReader, self).__init__()
+
+    def read(self, input_path_or_file: str, **kwargs):
+        pass
+
+
+class BaseExampleReader(ExampleReader):
+    def __init__(self, **kwargs):
+        super(BaseExampleReader, self).__init__(**kwargs)
+        self.DEFAULT_INPUT_FILE = 'sent'
+
+    def read(self, input_path_or_file: str, **kwargs) -> List[str]:
+        if not isinstance(input_path_or_file, (str, )):
+            raise TypeError(f'input_path_or_file must be a string, but is {type(input_path_or_file)}.')
+        if not input_path_or_file:
+            raise ValueError(f'input_path_or_file is an empty string!')
+        if not (os.path.isdir(input_path_or_file) or os.path.isfile(input_path_or_file)):
+            raise ValueError(f'find input_path_or_file does not exist.')
+        if os.path.isdir(input_path_or_file):
+            input_path_or_file = os.path.join(input_path_or_file, self.DEFAULT_INPUT_FILE)
+            if not os.path.isfile(input_path_or_file):
+                raise ValueError(f'Cannot find input_path_or_file')
+        examples = []
+        with open(input_path_or_file) as inp:
+            for line in inp:
+                line = line.strip()
+                examples.append(line)
+        return examples
+
+
 class DialogFlowAgentExport:
     def __init__(self, local_path_or_url, dialogflow=None, content_type='json', **kwargs):
         super(DialogFlowAgentExport, self).__init__()
@@ -385,6 +418,7 @@ class DialogFlowAgentExport:
 
     def get_intents(self, **kwargs) -> List[Dict[str, str]]:
         return self.intents_reader.get_intents(filter_intents=kwargs.get("filter_intents"))
+
 
 class DialogFlowAgentClient:
     def __init__(self, project_name, service_account, **kwargs):
@@ -410,23 +444,76 @@ class DialogFlowAgentClient:
             raise e
         return zip_raw
 
+class DialogFlowIntentClient:
+    def __init__(self, project_name, service_account, **kwargs):
+        if project_name is None or service_account is None:
+            raise ValueError(f'Please provide correct project name and service account file.')
+        self.client = dialogflow_v2.IntentsClient.from_service_account_json(service_account)
+        self.parent = f"projects/{project_name}/agent"
+    
+    def get_intents(self, **kwargs):
+        intents = self.client.list_intents(
+            parent=self.parent,
+            intent_view=dialogflow_v2.enums.IntentView.INTENT_VIEW_FULL
+        )
+        return intents
+
 class DialogFlowAgent:
-    def __init__(self, local_path_or_url, service_account, content_type='json', output_format='default', **kwargs):
+    def __init__(self, 
+        local_path_or_url: str,
+        service_account: str,
+        content_type: str ='json',
+        output_format: str ='default',
+        input_format: str ='default',
+        **kwargs
+    ):
         writers = {
             'default': BaseOutputFormatIntentWriter
         }
+        readers = {
+            'default': BaseExampleReader
+        }
+
         if output_format not in writers:
             raise ValueError(f'Cannot find output_format={output_format}.')
 
+        if input_format not in readers:
+            raise ValueError(f'Cannot find input_format={input_format}.')
+
         self.df_client = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
+        self.df_intent = DialogFlowIntentClient(project_name=local_path_or_url, service_account=service_account)
         self.df_export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df_client, content_type=content_type)
         self.writer    = writers[output_format](**kwargs)
+        self.reader    = readers[input_format](**kwargs)
 
     def _get_intents(self, **kwargs) -> List[Dict[str, str]]:
         return self.df_export.get_intents(filter_intents=kwargs.get("filter_intents"))
 
     def save_training_examples(self, examples, output_dir, **kwargs):
         self.writer.write(data=examples, output_dir=output_dir)
+
+    def add_training_examples(self, intent_name: str, input_dir_or_file: str, lang: str ='en', **kwargs) -> tuple:
+        # get raw examples
+        examples = self.reader.read(input_path_or_file=input_dir_or_file)
+        
+        # get examples in a format comapatible with DialogFlow
+        examples_as_parts = []
+        for example in examples:
+            parts = [
+                dialogflow_v2.types.Intent.TrainingPhrase.Part(text=example),
+            ]
+            examples_as_parts.append(dialogflow_v2.types.Intent.TrainingPhrase(parts=parts))
+        
+        # get intent to update
+        intents  = self.df_intent.get_intents()
+        for intent in intents:
+            if intent.display_name == intent_name:
+                intent.training_phrases.extend(examples_as_parts)
+                response = self.df_intent.update_intent(intent, language_code=lang)
+                return response, examples, examples_as_parts
+        
+        logger.error(f'Intent name = {intent_name} not found!')
+        return None, None, None
 
     def get_training_examples(self, **kwargs) -> List[DialoflowTrainingExample]:
         df_examples = []
