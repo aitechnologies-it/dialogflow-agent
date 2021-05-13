@@ -9,5 +9,4 @@ echo "Downloading dialogflow sentences. Project = ${LOCAL_OR_REMOTE}. Output dir
 python save_df_examples.py \
     --local_path_or_url $LOCAL_OR_REMOTE \
     --service_account $SERVICE_ACCOUNT \
-    --output_dir $OUTPUT_DIR \
-    --filter_intents fallback
+    --output_dir $OUTPUT_DIR
