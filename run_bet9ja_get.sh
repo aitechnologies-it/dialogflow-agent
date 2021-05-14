@@ -6,7 +6,8 @@ OUTPUT_DIR="../ml-artifacts/data/bet9ja"
 
 echo "Downloading dialogflow sentences. Project = ${LOCAL_OR_REMOTE}. Output dir = ${OUTPUT_DIR}"
 
-python save_df_examples.py \
+python run_dfagent.py \
+    --command "get" \
     --local_path_or_url $LOCAL_OR_REMOTE \
     --service_account $SERVICE_ACCOUNT \
     --output_dir $OUTPUT_DIR

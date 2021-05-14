@@ -1,3 +1,0 @@
-sentence number 1
-sentence number 2
-sentence number n

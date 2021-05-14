@@ -1,7 +1,7 @@
 ./install.sh
 
-LOCAL_OR_REMOTE="plg-chatbot"
-SERVICE_ACCOUNT="./credentials/dialogflow-fcqosk-plg-chatbot.json"
+LOCAL_OR_REMOTE="chatbot-colombia-int-301508"
+SERVICE_ACCOUNT="./credentials/dialogflow-int-colombia-int-301508.json"
 INPUT_DIR_OR_FILE="./frasi"
 INTENT_NAME="test"
 

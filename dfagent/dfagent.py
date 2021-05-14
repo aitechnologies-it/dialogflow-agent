@@ -13,6 +13,8 @@ from dataclasses import dataclass
 import operator
 
 from tqdm import tqdm
+import pydlib as dl
+from funcy import partial
 
 import google
 import dialogflow_v2
@@ -308,17 +310,17 @@ class JSONIntentReader(IntentReader):
         usersays_data: List[str, List[dict]] = list(self.read(glob='intents/*_usersays_*.json'))
         intent_data: List[Tuple[str, dict]] = list(self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))
         assert len(usersays_data) == len(intent_data), f"usersays files {len(usersays_data)} != {len(intent_data)} intent files. There would be disalignments"
-        usersays_data = [(f.replace("_usersays_es", ""),y) for (f,y) in usersays_data]
-        usersays_data.sort(key=operator.itemgetter(0))
-        intent_data.sort(key=operator.itemgetter(0))
-        for ((filename, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
+        usersays_data.sort(key=lambda x: x[0][:-17])  # trim '_usersays_en.json' or '_usersays_es.json'
+        intent_data.sort(key=lambda x: x[0][:-5])  # trim '.json'
+        for ((filename_usersays, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
+            assert filename_usersays[:-17] == filename_intent[:-5], f"Intent file {filename_intent} != usersays file {filename_usersays}"
             is_disabled = self.is_intent_disabled(intent)
             if is_disabled:
-                logger.info(f'Skipping file = {filename}. Cause: Disabled on DialogFlow.')
+                logger.info(f'Skipping file = {filename_usersays}. Cause: Disabled on DialogFlow.')
                 continue
             is_filtered = self.is_filtered(intent, filter_intents=kwargs.get("filter_intents"))
             if is_filtered:
-                logger.info(f'Skipping file = {filename}. Cause: Disabled via argument.')
+                logger.info(f'Skipping file = {filename_usersays}. Cause: Disabled via argument.')
                 continue
             label = self.get(intent, path='name')
             if label is None:
@@ -328,7 +330,7 @@ class JSONIntentReader(IntentReader):
                 data_content = self.get(us, path='data')
                 sentence = self.preprocessing_intent(self.get_text(data=data_content))
                 if sentence is None:
-                    logger.info(f'Found something broken in {filename}. It may be due to a missing data field, or malformed chunk for sentence = {i}. Skipping.')
+                    logger.info(f'Found something broken in {filename_usersays}. It may be due to a missing data field, or malformed chunk for sentence = {i}. Skipping.')
                     continue
                 tag = self.get_tag(data=data_content)
                 if tag is not None and len(sentence.split()) != len(tag.split()):
@@ -465,6 +467,52 @@ class DialogFlowIntentClient:
         )
         return response
 
+class OracleClient:
+    def __init__(self,
+        local_path_or_url,
+        service_account,
+        **kwargs
+    ):
+        self.df_client = None
+        self.df_intent = None
+        self.df_export = None
+        self.writer = None
+        self.reader = None
+
+        self.local_path_or_url = local_path_or_url
+        self.service_account = service_account
+        self.actions = {
+            'list_intents': {},
+            'get_intents': {'content_type': kwargs.pop('content_type')}
+        }
+
+    def from_action(self, action: str):
+        callback = None
+        if (action == "get_intents"):
+            if self.df_client is None:
+                self.df_client = DialogFlowAgentClient(
+                    project_name=self.local_path_or_url,
+                    service_account=self.service_account
+                )
+            if self.df_export is None:
+                self.df_export = DialogFlowAgentExport(
+                    local_path_or_url=self.local_path_or_url,
+                    dialogflow=self.df_client,
+                    **dl.get(self.actions, action, {}))
+                callback = partial(getattr(self.df_export, action))
+        elif (action in ("list_intents", "update_intent")):
+            if self.df_intent is None:
+                self.df_intent = DialogFlowIntentClient(
+                    project_name=self.local_path_or_url,
+                    service_account=self.service_account,
+                    **dl.get(self.actions, action, {})
+                )
+            callback = partial(getattr(self.df_intent, action))
+        else:
+            raise ValueError(f"Unknown action = {action}")
+
+        return callback
+
 class DialogFlowAgent:
     def __init__(self, 
         local_path_or_url: str,
@@ -487,14 +535,15 @@ class DialogFlowAgent:
         if input_format not in readers:
             raise ValueError(f'Cannot find input_format={input_format}.')
 
-        self.df_client = DialogFlowAgentClient(project_name=local_path_or_url, service_account=service_account)
-        self.df_intent = DialogFlowIntentClient(project_name=local_path_or_url, service_account=service_account)
-        self.df_export = DialogFlowAgentExport(local_path_or_url=local_path_or_url, dialogflow=self.df_client, content_type=content_type)
-        self.writer    = writers[output_format](**kwargs)
-        self.reader    = readers[input_format](**kwargs)
+        self.writer = writers[output_format](**kwargs)
+        self.reader = readers[input_format](**kwargs)
 
-    def _get_intents(self, **kwargs) -> List[Dict[str, str]]:
-        return self.df_export.get_intents(filter_intents=kwargs.get("filter_intents"))
+        self.oracle = OracleClient(
+            local_path_or_url=local_path_or_url,
+            service_account=service_account,
+            content_type=content_type,
+            **kwargs
+        )
 
     def save_training_examples(self, examples, output_dir, **kwargs):
         self.writer.write(data=examples, output_dir=output_dir)
@@ -512,18 +561,21 @@ class DialogFlowAgent:
             examples_as_parts.append(dialogflow_v2.types.Intent.TrainingPhrase(parts=parts))
         
         # get intent to update
-        intents = self.df_intent.list_intents()
-        for intent in intents:
-            if intent.display_name == intent_name:
-                intent.training_phrases.extend(examples_as_parts)
-                response = self.df_intent.update_intent(intent, language_code=lang)
-                return response, examples, examples_as_parts
-        
-        logger.error(f'Intent name = {intent_name} not found!')
-        return None, None, None
+        intents = iter(self.oracle.from_action('list_intents')())
+
+        response = None
+        try:
+            while (intent := next(intents)) and response is None:
+                if intent.display_name == intent_name:
+                    intent.training_phrases.extend(examples_as_parts)
+                    response = self.oracle.from_action('update_intent')(intent, language_code=lang)
+        except StopIteration:
+            response = f'Intent name = "{intent_name}" not found!'
+
+        return response, examples, examples_as_parts
 
     def get_training_examples(self, **kwargs) -> List[DialoflowTrainingExample]:
         df_examples = []
-        for example in self._get_intents(filter_intents=kwargs.get("filter_intents")):
+        for example in self.oracle.from_action('get_intents')(filter_intents=kwargs.get("filter_intents")):
             df_examples.append(DialoflowTrainingExample.from_dict(example))
         return df_examples
