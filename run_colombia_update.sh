@@ -13,4 +13,4 @@ python run_dfagent.py \
     --service_account $SERVICE_ACCOUNT \
     --input_dir_or_file $INPUT_DIR_OR_FILE \
     --intent_name $INTENT_NAME \
-    --lang en
+    --lang es
