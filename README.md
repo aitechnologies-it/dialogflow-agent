@@ -7,7 +7,19 @@ The dfagent is a package for the handling of Dialogflow agents. You can for exam
 
 ## Install
 
-To install the dfagent package you only need to run [install.sh](install.sh) script.
+To install **dfagent**, simply use `pip`:
+
+```bash
+$ pip install dfagent
+```
+
+or install from the repository:
+
+```bash
+$ git clone https://github.com/aitechnologies-it/dialogflow-agent.git
+$ cd dialogflow-agent
+$ python setup.py install
+```
 
 ## Usage
 Once dfagent is installed you can simply import it in your code. 
