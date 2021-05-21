@@ -18,9 +18,9 @@ else:
 setuptools.setup(
     name="dfagent",
     version="0.1",
-    author="Luigi Di Sotto",
-    author_email="luigi.disotto@aitechnologies.it",
-    description="A Dialogflow API intended for easily exporiting its content into a desired format for any use.",
+    author="Luigi Di Sotto, Diego Giorgini",
+    author_email="luigi.disotto@aitechnologies.it, diego.giorgini@aitechnologies.it",
+    description="Dialogflow agent is a library for online or offline handling of Dialogflow agents.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/aitechnologies-it/dialogflow-agent",
@@ -39,3 +39,6 @@ setuptools.setup(
     python_requires='>=3.8',
     install_requires=install_requires
 )
+
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
