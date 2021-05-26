@@ -305,13 +305,16 @@ class JSONIntentReader(IntentReader):
 
     def get_intents(self, **kwargs) -> List[Dict[str, str]]:
         intents = []
-        logger.info('Collecting intents.')
 
         usersays_data: List[str, List[dict]] = list(self.read(glob='intents/*_usersays_*.json'))
         intent_data: List[Tuple[str, dict]] = list(self.read(glob='intents/*.json', regex=r"^((?!.*usersays.*).)*$"))
+
         assert len(usersays_data) == len(intent_data), f"usersays files {len(usersays_data)} != {len(intent_data)} intent files. There would be disalignments"
-        usersays_data.sort(key=lambda x: x[0][:-17])  # trim '_usersays_en.json' or '_usersays_es.json'
-        intent_data.sort(key=lambda x: x[0][:-5])  # trim '.json'
+
+        usersays_data.sort(key=lambda x: x[0][:-17])  # sort with trim '_usersays_en.json' or '_usersays_es.json'
+        intent_data.sort(key=lambda x: x[0][:-5])     # sort with trim '.json'
+
+        logger.info('Collecting intents.')
         for ((filename_usersays, user_says), (filename_intent, intent)) in tqdm(zip(usersays_data, intent_data)):
             assert filename_usersays[:-17] == filename_intent[:-5], f"Intent file {filename_intent} != usersays file {filename_usersays}"
             is_disabled = self.is_intent_disabled(intent)
