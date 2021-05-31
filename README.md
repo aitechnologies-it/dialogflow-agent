@@ -1,4 +1,4 @@
-# dfagent 🤖
+# dfagent 🤖    [![Downloads](https://pepy.tech/badge/dfagent)](https://pepy.tech/project/dfagent)
 The dfagent is a package for the handling of Dialogflow agents. You can for example retrieve training examples and save into a preferred format, or you can use it to update an intent by simply feeding it training examples you stored in a preferred format.
 
 ## Overview
